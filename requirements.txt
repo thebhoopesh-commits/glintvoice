@@ -1,0 +1,7 @@
+keyboard
+numpy
+pyautogui
+sounddevice
+soundfile
+python-dotenv
+google-genai
