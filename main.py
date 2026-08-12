@@ -5,20 +5,19 @@ import tempfile
 import threading
 import time
 
-import keyboard
 import numpy as np
 import pyautogui
 import sounddevice as sd
 import soundfile as sf
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+
+from src.hotkey import setup_hotkey, wait_for_exit, register_start_callback, register_stop_callback
 
 # Load environment variables from .env
 load_dotenv()
 
 # Initialize Gemini Client
-# It will automatically look for GEMINI_API_KEY in the environment
 try:
     client = genai.Client()
 except Exception as e:
@@ -28,10 +27,10 @@ except Exception as e:
 
 # Configuration
 HOTKEY = 'ctrl+shift+space'
-SAMPLE_RATE = 16000 # Whisper and Gemini both prefer 16kHz
+SAMPLE_RATE = 16000
 CHANNELS = 1
 
-# Global state
+# Global state for audio
 is_recording = False
 audio_queue = queue.Queue()
 recording_thread = None
@@ -51,9 +50,7 @@ def process_audio(filename):
     """Sends the audio to Gemini for transcription and processing."""
     print(f"[*] Processing audio with Gemini...")
     try:
-        # Upload the file
         audio_file = client.files.upload(file=filename, config={'display_name': 'Dictation'})
-        
         prompt = (
             "You are an expert transcriptionist and editor. "
             "Listen to the following audio and transcribe it perfectly. "
@@ -70,82 +67,68 @@ def process_audio(filename):
         cleaned_text = response.text.strip()
         print(f"\n[+] Final Text: {cleaned_text}\n")
         
-        # Cleanup the uploaded file
         client.files.delete(name=audio_file.name)
-        
         return cleaned_text
     
     except Exception as e:
         print(f"[!] Error during processing: {e}")
         return None
 
-def toggle_recording():
+def start_recording_action():
     global is_recording, recording_thread, audio_queue
+    is_recording = True
+    audio_queue = queue.Queue()
+    recording_thread = threading.Thread(target=record_audio)
+    recording_thread.start()
+
+def stop_recording_action():
+    global is_recording, recording_thread, audio_queue
+    is_recording = False
     
-    if not is_recording:
-        # Start recording
-        is_recording = True
-        audio_queue = queue.Queue() # Reset queue
-        recording_thread = threading.Thread(target=record_audio)
-        recording_thread.start()
-    else:
-        # Stop recording
-        is_recording = False
-        print("[*] Recording stopped. Preparing audio...")
+    print("[*] Processing... please wait.")
+    if recording_thread:
+        recording_thread.join()
         
-        # Wait for recording thread to finish
-        if recording_thread:
-            recording_thread.join()
+    audio_data = []
+    while not audio_queue.empty():
+        audio_data.append(audio_queue.get())
+    
+    if not audio_data:
+        print("[!] No audio recorded.")
+        return
         
-        # Collect all audio data from queue
-        audio_data = []
-        while not audio_queue.empty():
-            audio_data.append(audio_queue.get())
-        
-        if not audio_data:
-            print("[!] No audio recorded.")
-            return
-            
-        audio_data = np.concatenate(audio_data, axis=0)
-        
-        # Save to a temporary WAV file
-        temp_dir = tempfile.gettempdir()
-        temp_file = os.path.join(temp_dir, 'wispr_dictation.wav')
-        
-        sf.write(temp_file, audio_data, SAMPLE_RATE)
-        
-        # Process the file
-        text = process_audio(temp_file)
-        
-        if text:
-            print("[*] Typing...")
-            # Use pyautogui to type out the text
-            # We add a small delay to ensure the target window is focused
-            time.sleep(0.1)
-            pyautogui.write(text)
-            
-            # Clean up local temp file
-            try:
-                os.remove(temp_file)
-            except:
-                pass
+    audio_data = np.concatenate(audio_data, axis=0)
+    
+    temp_dir = tempfile.gettempdir()
+    temp_file = os.path.join(temp_dir, 'wispr_dictation.wav')
+    
+    sf.write(temp_file, audio_data, SAMPLE_RATE)
+    
+    text = process_audio(temp_file)
+    
+    if text:
+        print("[*] Typing...")
+        time.sleep(0.1)
+        pyautogui.write(text)
+        try:
+            os.remove(temp_file)
+        except:
+            pass
 
 def main():
     print("=========================================")
     print("          GlintVoice")
     print("=========================================")
-    print(f"Press {HOTKEY} to start recording.")
-    print(f"Press {HOTKEY} again to stop recording and type the text.")
-    print("Press Ctrl+C in this terminal to exit.")
-    print("=========================================\n")
     
-    keyboard.add_hotkey(HOTKEY, toggle_recording)
+    # Register callbacks for the hotkey events
+    register_start_callback(start_recording_action)
+    register_stop_callback(stop_recording_action)
     
-    # Keep the main thread alive
-    try:
-        keyboard.wait()
-    except KeyboardInterrupt:
-        print("\nExiting...")
+    # Setup the global hotkey
+    setup_hotkey(HOTKEY)
+    
+    # Block and wait for exit
+    wait_for_exit()
 
 if __name__ == "__main__":
     main()
