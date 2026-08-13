@@ -4,9 +4,10 @@ import sys
 from dotenv import load_dotenv
 from google import genai
 
-from src.hotkey import setup_hotkey, wait_for_exit, register_start_callback, register_stop_callback
+from src.hotkey import setup_hotkey, register_start_callback, register_stop_callback
 from src.audio import start_recording, stop_recording
 from src.typer import type_text
+from src.overlay import Overlay
 
 # Load environment variables from .env
 load_dotenv()
@@ -20,6 +21,7 @@ except Exception as e:
     sys.exit(1)
 
 HOTKEY = 'ctrl+shift+space'
+overlay_instance = None
 
 def process_audio(filename):
     """Sends the audio to Gemini for transcription and processing."""
@@ -50,9 +52,14 @@ def process_audio(filename):
         return None
 
 def start_recording_action():
+    if overlay_instance:
+        overlay_instance.trigger_start_ripple()
     start_recording()
 
 def stop_recording_action():
+    if overlay_instance:
+        overlay_instance.trigger_stop_ripple()
+        
     print("[*] Processing... please wait.")
     
     # audio.py handles thread joining and returning the WAV file path
@@ -72,19 +79,29 @@ def stop_recording_action():
             pass
 
 def main():
+    global overlay_instance
     print("=========================================")
     print("          GlintVoice")
     print("=========================================")
+    
+    # Initialize the transparent overlay
+    overlay_instance = Overlay()
     
     # Register callbacks for the hotkey events
     register_start_callback(start_recording_action)
     register_stop_callback(stop_recording_action)
     
-    # Setup the global hotkey
+    # Setup the global hotkey (runs in a background thread)
     setup_hotkey(HOTKEY)
     
-    # Block and wait for exit
-    wait_for_exit()
+    print(f"[*] Hotkey listener active. Try pressing: {HOTKEY}")
+    print("[*] Overlay active. Close the terminal window to exit.")
+    
+    # Block the main thread with Tkinter's event loop
+    try:
+        overlay_instance.run()
+    except KeyboardInterrupt:
+        print("\nExiting...")
 
 if __name__ == "__main__":
     main()
