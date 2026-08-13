@@ -1,18 +1,12 @@
 import os
-import queue
 import sys
-import tempfile
-import threading
-import time
 
-import numpy as np
-import pyautogui
-import sounddevice as sd
-import soundfile as sf
 from dotenv import load_dotenv
 from google import genai
 
 from src.hotkey import setup_hotkey, wait_for_exit, register_start_callback, register_stop_callback
+from src.audio import start_recording, stop_recording
+from src.typer import type_text
 
 # Load environment variables from .env
 load_dotenv()
@@ -25,26 +19,7 @@ except Exception as e:
     print("Please make sure you have a valid GEMINI_API_KEY set in your .env file.")
     sys.exit(1)
 
-# Configuration
 HOTKEY = 'ctrl+shift+space'
-SAMPLE_RATE = 16000
-CHANNELS = 1
-
-# Global state for audio
-is_recording = False
-audio_queue = queue.Queue()
-recording_thread = None
-
-def record_audio():
-    """Records audio continuously until stopped."""
-    global is_recording
-    
-    print(f"[*] Recording started... Speak now!")
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='float32') as stream:
-        while is_recording:
-            # Read a small chunk of audio
-            data, overflowed = stream.read(1024)
-            audio_queue.put(data)
 
 def process_audio(filename):
     """Sends the audio to Gemini for transcription and processing."""
@@ -75,41 +50,22 @@ def process_audio(filename):
         return None
 
 def start_recording_action():
-    global is_recording, recording_thread, audio_queue
-    is_recording = True
-    audio_queue = queue.Queue()
-    recording_thread = threading.Thread(target=record_audio)
-    recording_thread.start()
+    start_recording()
 
 def stop_recording_action():
-    global is_recording, recording_thread, audio_queue
-    is_recording = False
-    
     print("[*] Processing... please wait.")
-    if recording_thread:
-        recording_thread.join()
-        
-    audio_data = []
-    while not audio_queue.empty():
-        audio_data.append(audio_queue.get())
     
-    if not audio_data:
+    # audio.py handles thread joining and returning the WAV file path
+    temp_file = stop_recording()
+    
+    if not temp_file:
         print("[!] No audio recorded.")
         return
         
-    audio_data = np.concatenate(audio_data, axis=0)
-    
-    temp_dir = tempfile.gettempdir()
-    temp_file = os.path.join(temp_dir, 'wispr_dictation.wav')
-    
-    sf.write(temp_file, audio_data, SAMPLE_RATE)
-    
     text = process_audio(temp_file)
     
     if text:
-        print("[*] Typing...")
-        time.sleep(0.1)
-        pyautogui.write(text)
+        type_text(text)
         try:
             os.remove(temp_file)
         except:
