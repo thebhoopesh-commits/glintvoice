@@ -2,7 +2,6 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from google import genai
 
 from src.hotkey import setup_hotkey, register_start_callback, register_stop_callback
 from src.audio import start_recording, stop_recording
@@ -12,19 +11,26 @@ from src.overlay import Overlay
 # Load environment variables from .env
 load_dotenv()
 
-# Initialize Gemini Client
+# Try to initialize Gemini Client (optional for Phase 1)
+client = None
 try:
+    from google import genai
     client = genai.Client()
-except Exception as e:
-    print(f"Error initializing Gemini client: {e}")
-    print("Please make sure you have a valid GEMINI_API_KEY set in your .env file.")
-    sys.exit(1)
+    print("[+] Gemini API connected. AI transcription enabled.")
+except Exception:
+    print("[!] No Gemini API key found. Running in DEMO MODE (no AI transcription).")
+    print("[!] To enable AI, create a .env file with: GEMINI_API_KEY=your_key_here")
 
 HOTKEY = 'ctrl+shift+space'
 overlay_instance = None
 
 def process_audio(filename):
     """Sends the audio to Gemini for transcription and processing."""
+    if not client:
+        # Demo mode: no API key, just return a placeholder
+        print("[*] Demo mode: skipping AI transcription.")
+        return "Hello from GlintVoice! (demo mode - no API key)"
+    
     print(f"[*] Processing audio with Gemini...")
     try:
         audio_file = client.files.upload(file=filename, config={'display_name': 'Dictation'})
@@ -62,7 +68,6 @@ def stop_recording_action():
         
     print("[*] Processing... please wait.")
     
-    # audio.py handles thread joining and returning the WAV file path
     temp_file = stop_recording()
     
     if not temp_file:
@@ -91,7 +96,7 @@ def main():
     register_start_callback(start_recording_action)
     register_stop_callback(stop_recording_action)
     
-    # Setup the global hotkey (runs in a background thread)
+    # Setup the global hotkey
     setup_hotkey(HOTKEY)
     
     print(f"[*] Hotkey listener active. Try pressing: {HOTKEY}")
