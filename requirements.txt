@@ -4,4 +4,4 @@ pyautogui
 sounddevice
 soundfile
 python-dotenv
-google-genai
+openai
